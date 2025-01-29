@@ -21,6 +21,7 @@ jobs:
         uses: actions/setup-java@v3
         with:
           java-version: '17'
+          distribution: 'temurin'
         # 의미: GitHub Actions의 가상머신에 자바 17 설치
 
       # 3) Gradle 빌드 (Spring Boot 프로젝트)
