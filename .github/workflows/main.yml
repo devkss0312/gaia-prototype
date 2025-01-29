@@ -16,6 +16,8 @@ jobs:
         uses: actions/checkout@v2
         # 의미: GitHub Actions 환경에서 현재 리포지토리의 코드를 다운받음
 
+      - name: Ensure gradlew is executable
+        run: chmod +x gradlew
       # 2) 자바 환경 세팅 (여기서는 예시로 JDK 17)
       - name: Set up JDK 17
         uses: actions/setup-java@v3
