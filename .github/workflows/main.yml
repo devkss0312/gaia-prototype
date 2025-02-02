@@ -19,7 +19,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U myuser -d mydb"
+          --health-cmd "pg_isready -U kss -d mydb"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
@@ -48,3 +48,37 @@ jobs:
           SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/mydb
           SPRING_DATASOURCE_USERNAME: kss
           SPRING_DATASOURCE_PASSWORD: root
+
+      # 5) JAR 파일을 EC2로 복사 (SCP 사용)
+      - name: Upload JAR to EC2
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "build/libs/*.jar"
+          target: "/home/ubuntu/"
+
+      # 6) EC2에서 JAR 실행 (기존 프로세스 종료 후 새로 실행)
+      - name: SSH to EC2 and Run Application
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            export JAR_PATH="/home/ubuntu/myapp.jar"
+
+            # 기존 애플리케이션 종료
+            if pgrep -f "$JAR_PATH"; then
+              echo "Stopping existing application..."
+              pkill -f "$JAR_PATH"
+            fi
+
+            # 새 JAR 파일로 실행
+            echo "Starting new application..."
+            nohup java -jar "$JAR_PATH" > /home/ubuntu/app.log 2>&1 &
+
+            # 실행된 프로세스 확인
+            sleep 5
+            pgrep -f "$JAR_PATH" && echo "Application started successfully!" || echo "Application failed to start!"
