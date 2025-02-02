@@ -68,25 +68,36 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             export JAR_PATH="/home/ubuntu/myapp.jar"
+            PID=$(pgrep -f "$JAR_PATH")
 
-            # 기존 애플리케이션 종료 (프로세스가 없으면 오류 방지)
-            if pgrep -f "$JAR_PATH"; then
+            # 기존 애플리케이션 종료 (안전하게 종료)
+            if [ -n "$PID" ]; then
               echo "Stopping existing application..."
-              pkill -f "$JAR_PATH"
-              sleep 3
+              kill -15 "$PID"
+              sleep 5
+              if ps -p "$PID" > /dev/null; then
+                echo "Force killing application..."
+                kill -9 "$PID"
+              fi
             else
-              echo "No existing application found. Skipping stop."
+              echo "No existing application found. Skipping termination."
             fi
 
-            # 새로운 애플리케이션 실행
-            echo "Starting new application..."
-            nohup java -jar "$JAR_PATH" > /home/ubuntu/app.log 2>&1 &
+            # JAR 파일 실행
+            if [ -f "$JAR_PATH" ]; then
+              echo "Starting new application..."
+              nohup java -jar "$JAR_PATH" > /home/ubuntu/app.log 2>&1 &
+              sleep 5
 
-            # 실행된 프로세스 확인
-            sleep 5
-            if pgrep -f "$JAR_PATH"; then
-              echo "Application started successfully!"
+              # 실행 확인
+              NEW_PID=$(pgrep -f "$JAR_PATH")
+              if [ -n "$NEW_PID" ]; then
+                echo "Application started successfully!"
+              else
+                echo "Application failed to start!"
+                exit 1
+              fi
             else
-              echo "Application failed to start!"
+              echo "JAR file not found! Deployment failed."
               exit 1
             fi
