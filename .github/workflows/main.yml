@@ -69,16 +69,24 @@ jobs:
           script: |
             export JAR_PATH="/home/ubuntu/myapp.jar"
 
-            # 기존 애플리케이션 종료
+            # 기존 애플리케이션 종료 (프로세스가 없으면 오류 방지)
             if pgrep -f "$JAR_PATH"; then
               echo "Stopping existing application..."
               pkill -f "$JAR_PATH"
+              sleep 3
+            else
+              echo "No existing application found. Skipping stop."
             fi
 
-            # 새 JAR 파일로 실행
+            # 새로운 애플리케이션 실행
             echo "Starting new application..."
             nohup java -jar "$JAR_PATH" > /home/ubuntu/app.log 2>&1 &
 
             # 실행된 프로세스 확인
             sleep 5
-            pgrep -f "$JAR_PATH" && echo "Application started successfully!" || echo "Application failed to start!"
+            if pgrep -f "$JAR_PATH"; then
+              echo "Application started successfully!"
+            else
+              echo "Application failed to start!"
+              exit 1
+            fi
