@@ -14,8 +14,8 @@ jobs:
         image: postgres:15
         env:
           POSTGRES_DB: mydb
-          POSTGRES_USER: myuser
-          POSTGRES_PASSWORD: mypassword
+          POSTGRES_USER: kss
+          POSTGRES_PASSWORD: root
         ports:
           - 5432:5432
         options: >-
