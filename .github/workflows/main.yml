@@ -64,7 +64,7 @@ jobs:
           source: "${{ env.JAR_NAME }}"
           target: "/home/ubuntu/gaia.jar"
 
-      # 7️⃣ EC2에서 기존 서버 종료 후 새 JAR 실행
+          # 7️⃣ EC2에서 기존 서버 종료 후 새 JAR 실행 (while 루프 적용)
       - name: SSH to EC2 and Run Application
         uses: appleboy/ssh-action@master
         with:
@@ -77,9 +77,20 @@ jobs:
 
             # 기존 애플리케이션 종료 (안전한 종료 방식)
             if [ -n "$PID" ]; then
-              echo "Stopping existing application..."
+              echo "Stopping existing application (PID: $PID)..."
               kill -15 "$PID"
-              sleep 5
+
+              # 최대 10초 동안 종료 확인
+              for i in {1..10}; do
+                if ! ps -p "$PID" > /dev/null; then
+                  echo "Application stopped successfully."
+                  break
+                fi
+                echo "Waiting for process to terminate..."
+                sleep 1
+              done
+
+              # 아직 살아있다면 강제 종료
               if ps -p "$PID" > /dev/null; then
                 echo "Force killing application..."
                 kill -9 "$PID"
@@ -98,9 +109,10 @@ jobs:
             echo "Starting new application..."
             nohup java -jar "$JAR_PATH" > /home/ubuntu/app.log 2>&1 &
 
-            # 실행된 프로세스 확인
+            # 실행된 프로세스 확인 (최대 10초 대기)
             sleep 5
             NEW_PID=$(pgrep -f "$JAR_PATH")
+
             if [ -n "$NEW_PID" ]; then
               echo "Application started successfully! PID: $NEW_PID"
             else
