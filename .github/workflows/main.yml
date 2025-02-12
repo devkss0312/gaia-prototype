@@ -1,4 +1,4 @@
-name: Build and Deploy to EC2
+name: Build and Deploy to EC2 via Docker
 
 on:
   push:
@@ -8,21 +8,6 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_DB: mydb
-          POSTGRES_USER: kss
-          POSTGRES_PASSWORD: root
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U kss -d mydb"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       # 1️⃣ 리포지토리 체크아웃
@@ -49,73 +34,56 @@ jobs:
           SPRING_DATASOURCE_USERNAME: kss
           SPRING_DATASOURCE_PASSWORD: root
 
-      # 5️⃣ 빌드된 JAR 파일명 가져오기
+      # 5️⃣ 빌드된 JAR 파일명 가져오기 (plain 제외)
       - name: Get JAR filename
         id: get_jar
-        run: echo "JAR_NAME=$(ls build/libs/gaia-*.jar | grep -v plain | head -n 1)" >> $GITHUB_ENV
+        run: |
+          JAR_NAME=$(ls build/libs/gaia-*.jar | grep -v plain | head -n 1)
+          echo "JAR_NAME=$JAR_NAME" >> $GITHUB_ENV
 
-      # 6️⃣ EC2에 JAR 파일 업로드 (`gaia.jar`로 이름 변경)
-      - name: Upload JAR to EC2
+      # 6️⃣ Docker Hub 로그인 (Personal Access Token 사용)
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
+
+      # 7️⃣ Docker 이미지 빌드 및 태깅
+      - name: Build and tag Docker image
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/gaia-app:latest .
+
+      # 8️⃣ Docker Hub에 푸시
+      - name: Push Docker image to Docker Hub
+        run: |
+          docker push ${{ secrets.DOCKER_USERNAME }}/gaia-app:latest
+
+      # 9️⃣ EC2에 Docker Compose 파일 전송
+      - name: Upload Docker Compose file to EC2
         uses: appleboy/scp-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "${{ env.JAR_NAME }}"
-          target: "/home/ubuntu/gaia.jar"
+          source: "docker-compose.yml"
+          target: "/home/ubuntu/docker-compose.yml"
 
-          # 7️⃣ EC2에서 기존 서버 종료 후 새 JAR 실행 (while 루프 적용)
-      - name: SSH to EC2 and Run Application
+      # 🔟 EC2에서 기존 컨테이너 중지 및 새 컨테이너 실행
+      - name: SSH to EC2 and Deploy
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            export JAR_PATH="/home/ubuntu/gaia.jar"
-            PID=$(pgrep -f "$JAR_PATH")
+            # 기존 컨테이너 종료
+            docker stop gaia-app || true
+            docker rm gaia-app || true
+            docker stop gaia-db || true
+            docker rm gaia-db || true
 
-            # 기존 애플리케이션 종료 (안전한 종료 방식)
-            if [ -n "$PID" ]; then
-              echo "Stopping existing application (PID: $PID)..."
-              kill -15 "$PID"
+            # 최신 이미지 가져오기
+            docker pull ${{ secrets.DOCKER_USERNAME }}/gaia-app:latest
 
-              # 최대 10초 동안 종료 확인
-              for i in {1..10}; do
-                if ! ps -p "$PID" > /dev/null; then
-                  echo "Application stopped successfully."
-                  break
-                fi
-                echo "Waiting for process to terminate..."
-                sleep 1
-              done
-
-              # 아직 살아있다면 강제 종료
-              if ps -p "$PID" > /dev/null; then
-                echo "Force killing application..."
-                kill -9 "$PID"
-              fi
-            else
-              echo "No existing application found. Skipping termination."
-            fi
-
-            # JAR 파일이 존재하는지 확인
-            if [ ! -f "$JAR_PATH" ]; then
-              echo "ERROR: JAR file not found at $JAR_PATH"
-              exit 1
-            fi
-
-            # 새 JAR 실행
-            echo "Starting new application..."
-            nohup java -jar "$JAR_PATH" > /home/ubuntu/app.log 2>&1 &
-
-            # 실행된 프로세스 확인 (최대 10초 대기)
-            sleep 5
-            NEW_PID=$(pgrep -f "$JAR_PATH")
-
-            if [ -n "$NEW_PID" ]; then
-              echo "Application started successfully! PID: $NEW_PID"
-            else
-              echo "Application failed to start!"
-              exit 1
-            fi
+            # Docker Compose 실행
+            docker-compose -f /home/ubuntu/docker-compose.yml up -d
